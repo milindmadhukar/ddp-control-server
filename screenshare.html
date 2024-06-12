@@ -1,0 +1,86 @@
+<!doctype html>
+<html>
+  <head>
+    <title>Continuous Screen Share</title>
+  </head>
+
+  <body>
+    <button id="startScreenShareBtn">Start Screen Share</button>
+
+    <video id="screenShareVideo" autoplay></video>
+
+    <script>
+      const startScreenShareBtn = document.getElementById(
+        "startScreenShareBtn",
+      );
+      let socket;
+
+      startScreenShareBtn.addEventListener("click", async () => {
+        try {
+          socket = new WebSocket("ws://localhost:8069/screenshare");
+
+          socket.onopen = () => {
+            console.log("WebSocket connection established");
+            startScreenShare();
+          };
+
+          socket.onmessage = (event) => {
+            console.log("Message received from server:", event.data);
+          };
+
+          socket.onerror = (error) => {
+            console.error("WebSocket error:", error);
+          };
+        } catch (error) {
+          console.error("Error establishing WebSocket connection:", error);
+        }
+      });
+
+      async function startScreenShare() {
+        try {
+          const stream = await navigator.mediaDevices.getDisplayMedia({
+            video: {
+              displaySurface: "browser",
+            },
+            audio: false,
+            preferCurrentTab: false,
+            selfBrowserSurface: "exclude",
+            systemAudio: "include",
+            surfaceSwitching: "include",
+            monitorTypeSurfaces: "include",
+          });
+
+          const videoTrack = stream.getVideoTracks()[0];
+          const imageCapture = new ImageCapture(videoTrack);
+
+          const screenShareVideo = document.getElementById("screenShareVideo");
+          screenShareVideo.srcObject = stream;
+
+          let animationFrameId;
+          const captureScreenLoop = () => {
+            imageCapture.grabFrame().then((bitmap) => {
+              const canvas = document.createElement("canvas");
+              canvas.width = bitmap.width;
+              canvas.height = bitmap.height;
+              const context = canvas.getContext("2d");
+              context.drawImage(bitmap, 0, 0);
+
+              const screenshotData = canvas.toDataURL("image/png");
+              sendScreenshotToServer(screenshotData);
+
+              animationFrameId = requestAnimationFrame(captureScreenLoop);
+            });
+          };
+
+          captureScreenLoop();
+        } catch (error) {
+          console.error("Error capturing screen:", error);
+        }
+      }
+
+      function sendScreenshotToServer(screenshotData) {
+        socket.send(screenshotData);
+      }
+    </script>
+  </body>
+</html>

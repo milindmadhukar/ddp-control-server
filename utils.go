@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"image"
 	"image/gif"
 	"image/png"
@@ -10,6 +11,22 @@ import (
 
 	"golang.org/x/image/draw"
 )
+
+func SaveFrames(foldername string, frames []*image.RGBA) {
+
+	os.RemoveAll(foldername)
+	os.Mkdir(foldername, 0755)
+
+	for i, frame := range frames {
+		out, err := os.Create(fmt.Sprintf("./%s/frame%d.png", foldername, i))
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		png.Encode(out, frame)
+		out.Close()
+	}
+}
 
 func SplitFrames(frames []*image.RGBA) ([]*image.RGBA, []*image.RGBA) {
 
@@ -129,7 +146,7 @@ func ImageToPixelData(ledMap *MatrixMap, img image.Image, pixelCount int, bright
 	scaledImg := image.NewRGBA(image.Rect(0,
 		0, ledMap.Width, ledMap.Height))
 
-	draw.NearestNeighbor.Scale(scaledImg, scaledImg.Bounds(), img, img.Bounds(), draw.Over, nil)
+	draw.BiLinear.Scale(scaledImg, scaledImg.Bounds(), img, img.Bounds(), draw.Over, nil)
 
 	data := make([]byte, 3*pixelCount)
 

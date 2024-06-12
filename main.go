@@ -2,14 +2,22 @@ package main
 
 import (
 	"encoding/json"
+	"image"
 	"log"
+	"net/http"
 	"os"
 	"time"
 
 	ddp "github.com/milindmadhukar/ddp-go"
+	"golang.org/x/image/draw"
 )
 
+var framesChan = make(chan image.Image, 100)
+
 func main() {
+	setupRoutes()
+	go http.ListenAndServe(":8069", nil)
+
 	plusClient, err := ddp.DefaultDDPConnection("192.168.1.41", 4048)
 	if err != nil {
 		log.Fatal(err)
@@ -55,51 +63,58 @@ func main() {
 	plusPixelCount := GetPixelCount(&plusMap)
 	crossPixelCount := GetPixelCount(&crossMap)
 
-	fps := 45
+	fps := 40
 	brightness := 0.1
 	delay := 1000 / fps
+	split := true
 
 	ticker := time.NewTicker(time.Millisecond * time.Duration(delay))
 
-	// frames, err := GetMp4Frames("oops.mp4")
 	frames, err := GetGIFFrames("./gifs/spiderverse.gif")
-	// leftFrames, rightFrames := SplitFrames(frames)
+  // frames, err := GetMp4Frames("./oops.mp4")
 	frameCount := len(frames)
 
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	// Save all frames as pngs into gifparts folder
+	// Generate frames from the GIF
+	go func() {
+		idx := 0
+		for range ticker.C {
+			// framesChan <- frames[idx]
+			idx = (idx + 1) % frameCount
+		}
+	}()
 
-	// os.RemoveAll("./gifparts")
-	// os.Mkdir("./gifparts", 0755)
-	//
-	// for i, frame := range frames {
-	// 	out, err := os.Create(fmt.Sprintf("./gifparts/frame%d.png", i))
-	// 	if err != nil {
-	// 		log.Fatal(err)
-	// 	}
-	//
-	// 	png.Encode(out, frame)
-	// 	out.Close()
-	// }
+	lastRecievedFrame := time.Now()
 
-	idx := 0
-	for range ticker.C {
-		go func() {
+	for frame := range framesChan {
+		go func(frame image.Image) {
+			var leftFrame, rightFrame *image.RGBA
+			if split {
+				leftFrame = image.NewRGBA(image.Rect(0, 0, frame.Bounds().Dx()/2, frame.Bounds().Dy()))
+				rightFrame = image.NewRGBA(image.Rect(0, 0, frame.Bounds().Dx()/2, frame.Bounds().Dy()))
 
-			frame := frames[idx]
+				draw.Draw(leftFrame, leftFrame.Bounds(), frame, image.Point{0, 0}, draw.Over)
+				draw.Draw(rightFrame, rightFrame.Bounds(), frame, image.Point{frame.Bounds().Dx() / 2, 0}, draw.Over)
 
+			} else {
+				leftFrame = frame.(*image.RGBA)
+				rightFrame = frame.(*image.RGBA)
+			}
 
-			plusData := ImageToPixelData(&plusMap, frame, plusPixelCount, brightness)
+			plusData := ImageToPixelData(&plusMap, leftFrame, plusPixelCount, brightness)
 			plusClient.Write(plusData)
 
-			crossData := ImageToPixelData(&crossMap, frame, crossPixelCount, brightness)
+			crossData := ImageToPixelData(&crossMap, rightFrame, crossPixelCount, brightness)
 			crossClient.Write(crossData)
-		}()
 
-		idx = (idx + 1) % frameCount
+			timeTaken := time.Since(lastRecievedFrame)
+			lastRecievedFrame = time.Now()
+
+			log.Println("Current frame rate: ", 1E9/timeTaken.Nanoseconds())
+		}(frame)
 	}
 
 }
