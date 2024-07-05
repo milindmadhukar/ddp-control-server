@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"image"
-	"io"
 	"log"
 	"net/http"
 	"os"
@@ -19,9 +18,9 @@ func main() {
 	setupRoutes()
 	go http.ListenAndServe(":8069", nil)
 
-  defer close(framesChan)
+	defer close(framesChan)
 
-plusClient, err := ddp.DefaultDDPConnection("192.168.1.41", 4048)
+	plusClient, err := ddp.DefaultDDPConnection("192.168.1.41", 4048)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -36,7 +35,7 @@ plusClient, err := ddp.DefaultDDPConnection("192.168.1.41", 4048)
 	defer crossClient.Close()
 
 	var plusMap MatrixMap
-	plusMapFile, err := os.Open("./plusledmap.json")
+	plusMapFile, err := os.Open("./media/maps/plusledmap.json")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -50,7 +49,7 @@ plusClient, err := ddp.DefaultDDPConnection("192.168.1.41", 4048)
 	plusMapFile.Close()
 
 	var crossMap MatrixMap
-	crossMapFile, err := os.Open("./crossledmap.json")
+	crossMapFile, err := os.Open("./media/maps/crossledmap.json")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -66,15 +65,14 @@ plusClient, err := ddp.DefaultDDPConnection("192.168.1.41", 4048)
 	plusPixelCount := GetPixelCount(&plusMap)
 	crossPixelCount := GetPixelCount(&crossMap)
 
-	fps := 10
-	brightness := 0.4
+	fps := 32
+	brightness := 0.1
 	delay := 1000 / fps
 	splitImage := false
 
 	ticker := time.NewTicker(time.Millisecond * time.Duration(delay))
 
-	frames, err := GetGIFFrames("./gifs/fire.gif")
-	// frames, err := GetMp4Frames("./oops.mp4")
+	frames, err := GetGIFFrames("./media/gifs/spiderverse.gif")
 	frameCount := len(frames)
 
 	if err != nil {
@@ -85,19 +83,10 @@ plusClient, err := ddp.DefaultDDPConnection("192.168.1.41", 4048)
 	go func() {
 		idx := 0
 		for range ticker.C {
-			framesChan <- frames[idx]
+			// framesChan <- frames[idx]
 			idx = (idx + 1) % frameCount
 		}
 	}()
-
-  // Open oops.mp4 as bytes
-  file, err := os.Open("oops.mp4")
-  if err != nil {
-    log.Fatal(err)
-  }
-  // Read the bytes from the file
-  videoBytes, err := io.ReadAll(file)
-  processVideoData(videoBytes)
 
 	lastRecievedFrame := time.Now()
 
@@ -122,10 +111,10 @@ plusClient, err := ddp.DefaultDDPConnection("192.168.1.41", 4048)
 			crossData := ImageToPixelData(&crossMap, rightFrame, crossPixelCount, brightness)
 			crossClient.Write(crossData)
 
-			timeTaken := time.Since(lastRecievedFrame)
+			log.Println("Current frame rate: ", 1e9/time.Since(lastRecievedFrame).Nanoseconds())
+
 			lastRecievedFrame = time.Now()
 
-			log.Println("Current frame rate: ", 1e9/timeTaken.Nanoseconds())
 		}(frame)
 	}
 

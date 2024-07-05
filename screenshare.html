@@ -3,95 +3,104 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Live Screen Sharing with Preview</title>
-    <style>
-        #preview {
-            max-width: 320px;
-            max-height: 180px;
-            border: 1px solid #ccc;
-        }
-    </style>
+    <title>Screen Capture and WebSocket Transmission</title>
 </head>
 <body>
-    <h1>Live Screen Sharing with Preview</h1>
-    <button id="startButton">Start Sharing</button>
-    <button id="stopButton" disabled>Stop Sharing</button>
-    <p id="status"></p>
-    <video id="preview" autoplay muted></video>
+    <button id="startButton">Start Capture</button>
+    <canvas id="canvas" style="display:none;"></canvas>
 
     <script>
         const startButton = document.getElementById('startButton');
-        const stopButton = document.getElementById('stopButton');
-        const statusElement = document.getElementById('status');
-        const previewVideo = document.getElementById('preview');
-        let mediaStream;
-        let mediaRecorder;
-        let websocket;
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        let stream;
+        let ws;
 
-        startButton.addEventListener('click', startSharing);
-        stopButton.addEventListener('click', stopSharing);
+        startButton.addEventListener('click', async () => {
+            // Set up WebSocket connection
+            ws = new WebSocket('ws://localhost:8069/screenshare');
 
-        async function startSharing() {
-            try {
-                mediaStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-                const videoTrack = mediaStream.getVideoTracks()[0];
-                const videoSettings = videoTrack.getSettings();
-                
-                statusElement.textContent = `Sharing screen: ${videoSettings.width}x${videoSettings.height}`;
-                startButton.disabled = true;
-                stopButton.disabled = false;
-
-                // Set up video preview
-                previewVideo.srcObject = mediaStream;
-
-                websocket = new WebSocket('ws://localhost:8069/screenshare');
-                websocket.binaryType = 'arraybuffer';
-                
-                websocket.onopen = () => {
-                    console.log('WebSocket connected');
-                    startRecording();
-                };
-                
-                websocket.onerror = (error) => {
-                    console.error('WebSocket error:', error);
-                    stopSharing();
-                };
-            } catch (error) {
-                console.error('Error starting screen share:', error);
-                statusElement.textContent = 'Failed to start screen sharing';
-            }
-        }
-
-        function startRecording() {
-            const mimeType = 'video/webm; codecs=vp8';
-            mediaRecorder = new MediaRecorder(mediaStream, {
-                mimeType: mimeType,
-                videoBitsPerSecond: 1000000 // Adjust as needed
-            });
-
-            mediaRecorder.ondataavailable = (event) => {
-                if (event.data.size > 0 && websocket.readyState === WebSocket.OPEN) {
-                    websocket.send(event.data);
-                }
+            ws.onopen = () => {
+                console.log('WebSocket connection established');
+                startCapture();
             };
 
-            mediaRecorder.start(100); // Produce data every 100ms
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+            };
+
+            ws.onclose = () => {
+                console.log('WebSocket connection closed');
+                stopCapture();
+            };
+        });
+
+        async function startCapture() {
+            try {
+                console.log('Attempting to start screen capture...');
+                stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+                console.log('Screen capture stream obtained:', stream);
+                const track = stream.getVideoTracks()[0];
+                console.log('Video track:', track);
+                const settings = track.getSettings();
+                console.log('Track settings:', settings);
+                canvas.width = settings.width;
+                canvas.height = settings.height;
+
+                // Start capturing and sending frames
+                captureAndSendFrame();
+            } catch (err) {
+                console.error('Error starting screen capture:', err);
+                console.error('Error name:', err.name);
+                console.error('Error message:', err.message);
+                console.error('Error stack:', err.stack);
+            }
         }
 
-        function stopSharing() {
-            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-                mediaRecorder.stop();
+        function stopCapture() {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
             }
-            if (mediaStream) {
-                mediaStream.getTracks().forEach(track => track.stop());
+        }
+
+        function captureAndSendFrame() {
+            if (!stream) {
+                console.error('Stream is not available');
+                return;
             }
-            if (websocket) {
-                websocket.close();
+
+            const track = stream.getVideoTracks()[0];
+            if (!track) {
+                console.error('No video track found in the stream');
+                return;
             }
-            startButton.disabled = false;
-            stopButton.disabled = true;
-            statusElement.textContent = 'Screen sharing stopped';
-            previewVideo.srcObject = null;
+
+            const processor = new ImageCapture(track);
+
+            processor.grabFrame()
+                .then(imageBitmap => {
+                    ctx.drawImage(imageBitmap, 0, 0, canvas.width, canvas.height);
+                    const imageData = canvas.toDataURL('image/jpeg', 0.7);
+                    
+                    // Send the image data via WebSocket
+                    if (ws.readyState === WebSocket.OPEN) {
+                        ws.send(imageData, { binary: true })
+                    } else {
+                        console.warn('WebSocket is not open. ReadyState:', ws.readyState);
+                    }
+
+                    // Schedule the next frame capture
+                    requestAnimationFrame(captureAndSendFrame);
+                })
+                .catch(error => {
+                    console.error('Error capturing frame:', error);
+                    console.error('Error name:', error.name);
+                    console.error('Error message:', error.message);
+                    console.error('Error stack:', error.stack);
+                    
+                    // Attempt to restart capture after a short delay
+                    setTimeout(captureAndSendFrame, 1000);
+                });
         }
     </script>
 </body>
