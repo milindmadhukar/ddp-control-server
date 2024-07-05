@@ -85,7 +85,7 @@ plusClient, err := ddp.DefaultDDPConnection("192.168.1.41", 4048)
 	go func() {
 		idx := 0
 		for range ticker.C {
-			// framesChan <- frames[idx]
+			framesChan <- frames[idx]
 			idx = (idx + 1) % frameCount
 		}
 	}()
