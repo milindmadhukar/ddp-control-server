@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"image"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -18,7 +19,9 @@ func main() {
 	setupRoutes()
 	go http.ListenAndServe(":8069", nil)
 
-	plusClient, err := ddp.DefaultDDPConnection("192.168.1.41", 4048)
+  defer close(framesChan)
+
+plusClient, err := ddp.DefaultDDPConnection("192.168.1.41", 4048)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -63,15 +66,15 @@ func main() {
 	plusPixelCount := GetPixelCount(&plusMap)
 	crossPixelCount := GetPixelCount(&crossMap)
 
-	fps := 40
-	brightness := 0.1
+	fps := 10
+	brightness := 0.4
 	delay := 1000 / fps
-	split := true
+	splitImage := false
 
 	ticker := time.NewTicker(time.Millisecond * time.Duration(delay))
 
-	frames, err := GetGIFFrames("./gifs/spiderverse.gif")
-  // frames, err := GetMp4Frames("./oops.mp4")
+	frames, err := GetGIFFrames("./gifs/fire.gif")
+	// frames, err := GetMp4Frames("./oops.mp4")
 	frameCount := len(frames)
 
 	if err != nil {
@@ -87,21 +90,30 @@ func main() {
 		}
 	}()
 
+  // Open oops.mp4 as bytes
+  file, err := os.Open("oops.mp4")
+  if err != nil {
+    log.Fatal(err)
+  }
+  // Read the bytes from the file
+  videoBytes, err := io.ReadAll(file)
+  processVideoData(videoBytes)
+
 	lastRecievedFrame := time.Now()
 
 	for frame := range framesChan {
 		go func(frame image.Image) {
-			var leftFrame, rightFrame *image.RGBA
-			if split {
+			var leftFrame, rightFrame image.Image
+			if splitImage {
 				leftFrame = image.NewRGBA(image.Rect(0, 0, frame.Bounds().Dx()/2, frame.Bounds().Dy()))
 				rightFrame = image.NewRGBA(image.Rect(0, 0, frame.Bounds().Dx()/2, frame.Bounds().Dy()))
 
-				draw.Draw(leftFrame, leftFrame.Bounds(), frame, image.Point{0, 0}, draw.Over)
-				draw.Draw(rightFrame, rightFrame.Bounds(), frame, image.Point{frame.Bounds().Dx() / 2, 0}, draw.Over)
+				draw.Draw(leftFrame.(*image.RGBA), leftFrame.Bounds(), frame, image.Point{0, 0}, draw.Over)
+				draw.Draw(rightFrame.(*image.RGBA), rightFrame.Bounds(), frame, image.Point{frame.Bounds().Dx() / 2, 0}, draw.Over)
 
 			} else {
-				leftFrame = frame.(*image.RGBA)
-				rightFrame = frame.(*image.RGBA)
+				leftFrame = frame
+				rightFrame = frame
 			}
 
 			plusData := ImageToPixelData(&plusMap, leftFrame, plusPixelCount, brightness)
@@ -113,7 +125,7 @@ func main() {
 			timeTaken := time.Since(lastRecievedFrame)
 			lastRecievedFrame = time.Now()
 
-			log.Println("Current frame rate: ", 1E9/timeTaken.Nanoseconds())
+			log.Println("Current frame rate: ", 1e9/timeTaken.Nanoseconds())
 		}(frame)
 	}
 

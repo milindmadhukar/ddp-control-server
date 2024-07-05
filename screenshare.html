@@ -1,86 +1,98 @@
-<!doctype html>
-<html>
-  <head>
-    <title>Continuous Screen Share</title>
-  </head>
-
-  <body>
-    <button id="startScreenShareBtn">Start Screen Share</button>
-
-    <video id="screenShareVideo" autoplay></video>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Screen Sharing with Preview</title>
+    <style>
+        #preview {
+            max-width: 320px;
+            max-height: 180px;
+            border: 1px solid #ccc;
+        }
+    </style>
+</head>
+<body>
+    <h1>Live Screen Sharing with Preview</h1>
+    <button id="startButton">Start Sharing</button>
+    <button id="stopButton" disabled>Stop Sharing</button>
+    <p id="status"></p>
+    <video id="preview" autoplay muted></video>
 
     <script>
-      const startScreenShareBtn = document.getElementById(
-        "startScreenShareBtn",
-      );
-      let socket;
+        const startButton = document.getElementById('startButton');
+        const stopButton = document.getElementById('stopButton');
+        const statusElement = document.getElementById('status');
+        const previewVideo = document.getElementById('preview');
+        let mediaStream;
+        let mediaRecorder;
+        let websocket;
 
-      startScreenShareBtn.addEventListener("click", async () => {
-        try {
-          socket = new WebSocket("ws://localhost:8069/screenshare");
+        startButton.addEventListener('click', startSharing);
+        stopButton.addEventListener('click', stopSharing);
 
-          socket.onopen = () => {
-            console.log("WebSocket connection established");
-            startScreenShare();
-          };
+        async function startSharing() {
+            try {
+                mediaStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+                const videoTrack = mediaStream.getVideoTracks()[0];
+                const videoSettings = videoTrack.getSettings();
+                
+                statusElement.textContent = `Sharing screen: ${videoSettings.width}x${videoSettings.height}`;
+                startButton.disabled = true;
+                stopButton.disabled = false;
 
-          socket.onmessage = (event) => {
-            console.log("Message received from server:", event.data);
-          };
+                // Set up video preview
+                previewVideo.srcObject = mediaStream;
 
-          socket.onerror = (error) => {
-            console.error("WebSocket error:", error);
-          };
-        } catch (error) {
-          console.error("Error establishing WebSocket connection:", error);
+                websocket = new WebSocket('ws://localhost:8069/screenshare');
+                websocket.binaryType = 'arraybuffer';
+                
+                websocket.onopen = () => {
+                    console.log('WebSocket connected');
+                    startRecording();
+                };
+                
+                websocket.onerror = (error) => {
+                    console.error('WebSocket error:', error);
+                    stopSharing();
+                };
+            } catch (error) {
+                console.error('Error starting screen share:', error);
+                statusElement.textContent = 'Failed to start screen sharing';
+            }
         }
-      });
 
-      async function startScreenShare() {
-        try {
-          const stream = await navigator.mediaDevices.getDisplayMedia({
-            video: {
-              displaySurface: "browser",
-            },
-            audio: false,
-            preferCurrentTab: false,
-            selfBrowserSurface: "exclude",
-            systemAudio: "include",
-            surfaceSwitching: "include",
-            monitorTypeSurfaces: "include",
-          });
-
-          const videoTrack = stream.getVideoTracks()[0];
-          const imageCapture = new ImageCapture(videoTrack);
-
-          const screenShareVideo = document.getElementById("screenShareVideo");
-          screenShareVideo.srcObject = stream;
-
-          let animationFrameId;
-          const captureScreenLoop = () => {
-            imageCapture.grabFrame().then((bitmap) => {
-              const canvas = document.createElement("canvas");
-              canvas.width = bitmap.width;
-              canvas.height = bitmap.height;
-              const context = canvas.getContext("2d");
-              context.drawImage(bitmap, 0, 0);
-
-              const screenshotData = canvas.toDataURL("image/png");
-              sendScreenshotToServer(screenshotData);
-
-              animationFrameId = requestAnimationFrame(captureScreenLoop);
+        function startRecording() {
+            const mimeType = 'video/webm; codecs=vp8';
+            mediaRecorder = new MediaRecorder(mediaStream, {
+                mimeType: mimeType,
+                videoBitsPerSecond: 1000000 // Adjust as needed
             });
-          };
 
-          captureScreenLoop();
-        } catch (error) {
-          console.error("Error capturing screen:", error);
+            mediaRecorder.ondataavailable = (event) => {
+                if (event.data.size > 0 && websocket.readyState === WebSocket.OPEN) {
+                    websocket.send(event.data);
+                }
+            };
+
+            mediaRecorder.start(100); // Produce data every 100ms
         }
-      }
 
-      function sendScreenshotToServer(screenshotData) {
-        socket.send(screenshotData);
-      }
+        function stopSharing() {
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+            }
+            if (mediaStream) {
+                mediaStream.getTracks().forEach(track => track.stop());
+            }
+            if (websocket) {
+                websocket.close();
+            }
+            startButton.disabled = false;
+            stopButton.disabled = true;
+            statusElement.textContent = 'Screen sharing stopped';
+            previewVideo.srcObject = null;
+        }
     </script>
-  </body>
+</body>
 </html>
